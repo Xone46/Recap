@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import stat
+import struct
 import tempfile
 import zipfile
 from pathlib import Path
@@ -15,7 +16,7 @@ from recap_docx import _source_root
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CACHET = Path(r"C:\Users\Test\Desktop\DH\tools\cachet_gthconsult_transparent.png")
-DEFAULT_SIGNATURE = ROOT / "assets" / "signature.png"
+DEFAULT_SIGNATURE = ROOT / "signature" / "amine_foura.png"
 MEDIA_CACHET = "word/media/cachet_gthconsult.png"
 MEDIA_SIGNATURE = "word/media/signature_gthconsult.png"
 
@@ -111,41 +112,38 @@ def append(parent, ns, name, attrs=None):
     return el
 
 
-def make_image_paragraph(doc, rid, name, cx, cy, y_offset):
+def make_image_paragraph(doc, rid, name, cx, cy, y_offset=None):
     p = make_el(doc, W, "w:p")
     p_pr = append(p, W, "w:pPr")
     append(p_pr, W, "w:jc", {"w:val": "center"})
     append(p_pr, W, "w:spacing", {"w:before": "0", "w:after": "0", "w:line": "240", "w:lineRule": "auto"})
     r_el = append(p, W, "w:r")
     drawing = append(r_el, W, "w:drawing")
-    anchor = append(
-        drawing,
-        WP,
-        "wp:anchor",
-        {
-            "distT": "0",
-            "distB": "0",
-            "distL": "0",
-            "distR": "0",
-            "simplePos": "0",
-            "relativeHeight": "251658240",
-            "behindDoc": "0",
-            "locked": "0",
-            "layoutInCell": "1",
-            "allowOverlap": "1",
-        },
-    )
-    append(anchor, WP, "wp:simplePos", {"x": "0", "y": "0"})
-    pos_h = append(anchor, WP, "wp:positionH", {"relativeFrom": "column"})
-    append(pos_h, WP, "wp:align").appendChild(doc.createTextNode("center"))
-    pos_v = append(anchor, WP, "wp:positionV", {"relativeFrom": "paragraph"})
-    append(pos_v, WP, "wp:posOffset").appendChild(doc.createTextNode(str(y_offset)))
-    append(anchor, WP, "wp:extent", {"cx": str(cx), "cy": str(cy)})
-    append(anchor, WP, "wp:effectExtent", {"l": "0", "t": "0", "r": "0", "b": "0"})
-    append(anchor, WP, "wp:wrapNone")
-    append(anchor, WP, "wp:docPr", {"id": next_docpr_id(doc), "name": name})
-    append(anchor, WP, "wp:cNvGraphicFramePr")
-    graphic = append(anchor, A, "a:graphic")
+    if y_offset is None:
+        container = append(drawing, WP, "wp:inline", {"distT": "0", "distB": "0", "distL": "0", "distR": "0"})
+    else:
+        container = append(
+            drawing,
+            WP,
+            "wp:anchor",
+            {
+                "distT": "0", "distB": "0", "distL": "0", "distR": "0", "simplePos": "0",
+                "relativeHeight": "251658240", "behindDoc": "0", "locked": "0",
+                "layoutInCell": "1", "allowOverlap": "1",
+            },
+        )
+        append(container, WP, "wp:simplePos", {"x": "0", "y": "0"})
+        pos_h = append(container, WP, "wp:positionH", {"relativeFrom": "column"})
+        append(pos_h, WP, "wp:align").appendChild(doc.createTextNode("center"))
+        pos_v = append(container, WP, "wp:positionV", {"relativeFrom": "paragraph"})
+        append(pos_v, WP, "wp:posOffset").appendChild(doc.createTextNode(str(y_offset)))
+    append(container, WP, "wp:extent", {"cx": str(cx), "cy": str(cy)})
+    append(container, WP, "wp:effectExtent", {"l": "0", "t": "0", "r": "0", "b": "0"})
+    if y_offset is not None:
+        append(container, WP, "wp:wrapNone")
+    append(container, WP, "wp:docPr", {"id": next_docpr_id(doc), "name": name})
+    append(container, WP, "wp:cNvGraphicFramePr")
+    graphic = append(container, A, "a:graphic")
     graphic_data = append(
         graphic,
         A,
@@ -167,6 +165,18 @@ def make_image_paragraph(doc, rid, name, cx, cy, y_offset):
     geom = append(sp_pr, A, "a:prstGeom", {"prst": "rect"})
     append(geom, A, "a:avLst")
     return p
+
+
+def signature_dimensions(data: bytes) -> tuple[int, int]:
+    """Fit a PNG signature inside a conservative area of the left table cell."""
+    max_width, max_height = 1_234_440, 731_520  # 1.35 × 0.80 inches in EMU.
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or len(data) < 24:
+        return max_width, max_height
+    width, height = struct.unpack(">II", data[16:24])
+    if not width or not height:
+        return max_width, max_height
+    scale = min(max_width / width, max_height / height)
+    return max(1, int(width * scale)), max(1, int(height * scale))
 
 
 def clear_cell_keep_props(tc):
@@ -209,7 +219,9 @@ def _ensure_png_content_type(ct_doc):
         ct_doc.documentElement.appendChild(default)
 
 
-def stamp_docx(path: Path, cachet_bytes: bytes, signature_bytes: bytes | None = None) -> tuple[bool, str]:
+def stamp_docx(
+    path: Path, cachet_bytes: bytes | None = None, signature_bytes: bytes | None = None
+) -> tuple[bool, str]:
     with zipfile.ZipFile(path, "r") as zin:
         data = {name: zin.read(name) for name in zin.namelist()}
 
@@ -242,18 +254,22 @@ def stamp_docx(path: Path, cachet_bytes: bytes, signature_bytes: bytes | None = 
         sig_rel.setAttribute("Target", "media/signature_gthconsult.png")
         rels_doc.documentElement.appendChild(sig_rel)
         clear_cell_keep_props(signature_cell)
-        signature_cell.appendChild(make_image_paragraph(doc, sig_rid, "Signature GTHCONSULT", 1120000, 520000, "-130000"))
+        sig_width, sig_height = signature_dimensions(signature_bytes)
+        signature_cell.appendChild(
+            make_image_paragraph(doc, sig_rid, "Signature Inspecteur Agree", sig_width, sig_height)
+        )
         rels_payloads.append((MEDIA_SIGNATURE, signature_bytes))
 
-    cachet_rid = next_rid(rels_doc)
-    cachet_rel = rels_doc.createElementNS(REL, "Relationship")
-    cachet_rel.setAttribute("Id", cachet_rid)
-    cachet_rel.setAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")
-    cachet_rel.setAttribute("Target", "media/cachet_gthconsult.png")
-    rels_doc.documentElement.appendChild(cachet_rel)
-    clear_cell_keep_props(cachet_cell)
-    cachet_cell.appendChild(make_image_paragraph(doc, cachet_rid, "Cachet GTHCONSULT", 1417320, 905256, "-155000"))
-    rels_payloads.append((MEDIA_CACHET, cachet_bytes))
+    if cachet_bytes:
+        cachet_rid = next_rid(rels_doc)
+        cachet_rel = rels_doc.createElementNS(REL, "Relationship")
+        cachet_rel.setAttribute("Id", cachet_rid)
+        cachet_rel.setAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")
+        cachet_rel.setAttribute("Target", "media/cachet_gthconsult.png")
+        rels_doc.documentElement.appendChild(cachet_rel)
+        clear_cell_keep_props(cachet_cell)
+        cachet_cell.appendChild(make_image_paragraph(doc, cachet_rid, "Cachet GTHCONSULT", 1417320, 905256, "-155000"))
+        rels_payloads.append((MEDIA_CACHET, cachet_bytes))
 
     data["word/document.xml"] = serialize(doc)
     data["word/_rels/document.xml.rels"] = serialize(rels_doc)
@@ -282,13 +298,19 @@ def _resolve_output_root(source: Path, output: Path | None) -> Path:
     return (ROOT / "outputs" / f"{_safe_name(source.name)}_cachet").resolve()
 
 
-def process_source(source: Path, output: Path | None = None, cachet_path: Path | None = None, signature_path: Path | None = None) -> list[str]:
+def process_source(
+    source: Path,
+    output: Path | None = None,
+    cachet_path: Path | None = None,
+    signature_path: Path | None = None,
+    include_signature: bool = True,
+) -> list[str]:
     source = source.resolve()
     output_root = _resolve_output_root(source, output)
     cachet_asset = cachet_path or DEFAULT_CACHET
     if not cachet_asset.exists():
         raise FileNotFoundError(f"Cachet introuvable: {cachet_asset}")
-    signature_asset = signature_path or (DEFAULT_SIGNATURE if DEFAULT_SIGNATURE.exists() else None)
+    signature_asset = signature_path or (DEFAULT_SIGNATURE if include_signature and DEFAULT_SIGNATURE.exists() else None)
     if signature_asset is not None and not signature_asset.exists():
         raise FileNotFoundError(f"Signature introuvable: {signature_asset}")
     cachet_bytes = cachet_asset.read_bytes()
@@ -312,12 +334,36 @@ def process_source(source: Path, output: Path | None = None, cachet_path: Path |
         return results
 
 
+def process_inspector_source(source: Path, output: Path | None = None, signature_path: Path | None = None) -> list[str]:
+    """Copy reports then add only the approved inspector's signature."""
+    source = source.resolve()
+    output_root = output.resolve() if output is not None else (ROOT / "outputs" / f"{_safe_name(source.name)}_inspecteur").resolve()
+    signature_asset = signature_path or DEFAULT_SIGNATURE
+    if not signature_asset.exists():
+        raise FileNotFoundError(f"Signature inspecteur introuvable: {signature_asset}")
+    signature_bytes = signature_asset.read_bytes()
+
+    with _source_root(source) as root:
+        _copy_source_tree(root, output_root)
+        docs = sorted(p for p in output_root.rglob("*.docx") if not p.name.startswith("~$"))
+        results: list[str] = []
+        for path in docs:
+            rel = path.relative_to(output_root)
+            try:
+                updated, msg = stamp_docx(path, signature_bytes=signature_bytes)
+                results.append(f"{'OK' if updated else 'SKIP'}\t{rel}\t{msg}")
+            except Exception as exc:
+                results.append(f"ERROR\t{rel}\t{exc}")
+        return results
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ajoute le cachet et la signature dans tous les rapports DOCX.")
     parser.add_argument("source", help="Dossier ou archive .zip/.rar contenant les rapports DOCX")
     parser.add_argument("-o", "--output", help="Dossier de sortie pour les DOCX estampilles")
     parser.add_argument("--cachet", help="Chemin vers l'image du cachet")
-    parser.add_argument("--signature", help="Chemin vers l'image de signature (par defaut: assets/signature.png)")
+    parser.add_argument("--signature", help="Chemin vers l'image de signature (par defaut: signature/amine_foura.png)")
+    parser.add_argument("--sans-signature", action="store_true", help="Ajoute uniquement le cachet d'administration")
     args = parser.parse_args()
 
     source = Path(args.source)
@@ -325,7 +371,10 @@ def main() -> None:
     cachet_path = Path(args.cachet) if args.cachet else None
     signature_path = Path(args.signature) if args.signature else None
 
-    results = process_source(source, output=output, cachet_path=cachet_path, signature_path=signature_path)
+    results = process_source(
+        source, output=output, cachet_path=cachet_path, signature_path=signature_path,
+        include_signature=not args.sans_signature,
+    )
     out_dir = _resolve_output_root(source.resolve(), output)
     processed = len(results)
     ok = sum(line.startswith("OK\t") for line in results)

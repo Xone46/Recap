@@ -6,10 +6,8 @@ param(
     [string]$OutputPath,
 
     [Parameter(Mandatory = $false)]
-    [string]$CachetPath,
+    [string]$CachetPath
 
-    [Parameter(Mandatory = $false)]
-    [string]$SignaturePath
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +16,13 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $inputFullPath = (Resolve-Path -LiteralPath $InputPath).Path
 $outputDir = Join-Path $projectRoot "outputs"
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+$completedOutputs = [System.Collections.Generic.List[string]]::new()
+
+function Save-WorkflowState {
+    if ($completedOutputs.Count -gt 0) {
+        Set-Content -LiteralPath (Join-Path $outputDir ".last_cachet_paths.txt") -Value $completedOutputs -Encoding utf8
+    }
+}
 
 function Get-SafeName {
     param([string]$Name)
@@ -39,15 +44,14 @@ function Invoke-Stamp {
     Write-Host "Input : $SourcePath"
     Write-Host "Output: $TargetPath"
 
-    $args = @(".\stamp_reports.py", $SourcePath, "-o", $TargetPath)
+    $args = @(".\stamp_reports.py", $SourcePath, "-o", $TargetPath, "--sans-signature")
     if ($CachetPath) {
         $args += @("--cachet", $CachetPath)
     }
-    if ($SignaturePath) {
-        $args += @("--signature", $SignaturePath)
-    }
-
     & rtk python @args
+    if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $TargetPath -PathType Container)) {
+        $completedOutputs.Add((Resolve-Path -LiteralPath $TargetPath).Path)
+    }
 }
 
 Set-Location $projectRoot
@@ -66,6 +70,7 @@ if (Test-Path -LiteralPath $inputFullPath -PathType Container) {
             }
             Invoke-Stamp $archive.FullName $target
         }
+        Save-WorkflowState
         exit 0
     }
 }
@@ -76,3 +81,4 @@ if (-not $OutputPath) {
 }
 
 Invoke-Stamp $inputFullPath $OutputPath
+Save-WorkflowState

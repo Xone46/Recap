@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $false, Position = 0)]
-    [string]$InputPath = ".\input",
+    [string]$InputPath,
 
     [Parameter(Mandatory = $false, Position = 1)]
     [string]$OutputPath
@@ -9,7 +9,6 @@ param(
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$inputFullPath = (Resolve-Path -LiteralPath $InputPath).Path
 $outputDir = Join-Path $projectRoot "outputs"
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
@@ -36,6 +35,26 @@ function Invoke-Recap {
 }
 
 Set-Location $projectRoot
+
+if (-not $InputPath) {
+    $statePath = Join-Path $outputDir ".last_inspecteur_paths.txt"
+    $sources = @()
+    if (Test-Path -LiteralPath $statePath) {
+        $sources = @(Get-Content -LiteralPath $statePath | Where-Object { Test-Path -LiteralPath $_ -PathType Container })
+    }
+    if (-not $sources) {
+        $sources = @(Get-ChildItem -LiteralPath $outputDir -Directory -Filter "*_inspecteur" | Sort-Object LastWriteTime | Select-Object -ExpandProperty FullName)
+    }
+    if (-not $sources) { throw "Aucun dossier DOCX signe '*_inspecteur' trouve dans outputs." }
+    foreach ($source in $sources) {
+        $leaf = Split-Path -Leaf $source
+        $target = Join-Path $outputDir (($leaf -replace "_inspecteur$", "") + "_recap.xls")
+        Invoke-Recap $source $target
+    }
+    exit 0
+}
+
+$inputFullPath = (Resolve-Path -LiteralPath $InputPath).Path
 
 if (Test-Path -LiteralPath $inputFullPath -PathType Container) {
     $hasDirectContent = Get-ChildItem -LiteralPath $inputFullPath -Force | Where-Object {

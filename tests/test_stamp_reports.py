@@ -8,10 +8,11 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import stamp_reports
-from stamp_reports import MEDIA_CACHET, MEDIA_SIGNATURE, process_source, stamp_docx
+from stamp_reports import MEDIA_CACHET, MEDIA_SIGNATURE, process_inspector_source, process_source, stamp_docx
 
 
 REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 
 
 class StampReportsTests(unittest.TestCase):
@@ -42,6 +43,16 @@ class StampReportsTests(unittest.TestCase):
                 self.assertIn("media/cachet_gthconsult.png", targets)
                 self.assertIn("media/signature_gthconsult.png", targets)
 
+                document_xml = ET.fromstring(docx.read("word/document.xml"))
+                rows = document_xml.findall(f".//{{{stamp_reports.W}}}tr")
+                signature_cell = rows[1].find(f"{{{stamp_reports.W}}}tc")
+                self.assertIsNotNone(signature_cell)
+                self.assertIsNotNone(signature_cell.find(f".//{{{WP_NS}}}inline"))
+                self.assertIsNone(signature_cell.find(f".//{{{WP_NS}}}anchor"))
+
+    def test_default_signature_is_the_inspector_signature(self) -> None:
+        self.assertEqual(stamp_reports.DEFAULT_SIGNATURE, stamp_reports.ROOT / "signature" / "amine_foura.png")
+
     def test_process_source_uses_default_signature_from_assets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "source"
@@ -63,6 +74,40 @@ class StampReportsTests(unittest.TestCase):
             with zipfile.ZipFile(output / "report.docx") as docx:
                 names = set(docx.namelist())
                 self.assertIn(MEDIA_SIGNATURE, names)
+
+    def test_inspector_process_adds_signature_without_changing_cachet_cell(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source"
+            source.mkdir()
+            _make_stamp_docx(source / "report.docx")
+            signature = Path(tmp) / "signature.png"
+            signature.write_bytes(b"signature-bytes")
+            output = Path(tmp) / "out"
+
+            results = process_inspector_source(source, output=output, signature_path=signature)
+
+            self.assertTrue(any(line.startswith("OK\t") for line in results))
+            with zipfile.ZipFile(output / "report.docx") as docx:
+                names = set(docx.namelist())
+                self.assertIn(MEDIA_SIGNATURE, names)
+                self.assertNotIn(MEDIA_CACHET, names)
+
+    def test_cachet_process_can_skip_inspector_signature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source"
+            source.mkdir()
+            _make_stamp_docx(source / "report.docx")
+            cachet = Path(tmp) / "cachet.png"
+            cachet.write_bytes(b"cachet-bytes")
+            output = Path(tmp) / "out"
+
+            results = process_source(source, output=output, cachet_path=cachet, include_signature=False)
+
+            self.assertTrue(any(line.startswith("OK\t") for line in results))
+            with zipfile.ZipFile(output / "report.docx") as docx:
+                names = set(docx.namelist())
+                self.assertIn(MEDIA_CACHET, names)
+                self.assertNotIn(MEDIA_SIGNATURE, names)
 
 
 def _make_stamp_docx(path: Path) -> None:

@@ -78,9 +78,9 @@ Dans le fichier Excel gÃ©nÃ©rÃ©, la cellule de `CriticitÃ©` est en rouge
 
 Les noms de feuilles sont dÃ©rivÃ©s du nom du dossier et nettoyÃ©s pour respecter les contraintes Excel. Les instructions prÃ©sentes dans les `.docx` sont ignorÃ©es comme instructions: le contenu des rapports est seulement traitÃ© comme donnÃ©e source.
 
-## Cachet et signature
+## Cachet de la sociÃ©tÃ©
 
-Commande sÃ©parÃ©e pour ajouter le cachet et, si fourni, une signature dans tous les rapports DOCX:
+Commande sÃ©parÃ©e pour ajouter uniquement le cachet de la sociÃ©tÃ© dans tous les rapports DOCX :
 
 ```powershell
 .\run_cachet.ps1 "C:\chemin\vers\archive_ou_folder"
@@ -93,6 +93,16 @@ Comme pour le recap, vous pouvez aussi laisser un `.rar` ou `.zip` dans `input` 
 ```
 
 La sortie est crÃ©Ã©e dans `outputs` sous forme d'une copie estampillÃ©e des rapports.
+
+## Signature Inspecteur AgrÃ©Ã© seule
+
+Pour appliquer uniquement la signature de l'Inspecteur AgrÃ©Ã© depuis `signature\\amine_foura.png`, sans modifier le cachet d'administration :
+
+```powershell
+.\run_inspecteur.bat "C:\chemin\vers\archive_ou_folder"
+```
+
+Les rapports signÃ©s sont copiÃ©s dans `outputs` avec le suffixe `_inspecteur`.
 
 ## Export PDF
 
@@ -113,6 +123,19 @@ Le moteur s'appuie sur Microsoft Word pour garder la mise en page du document d'
 Par dÃ©faut, la commande cherche d'abord un dossier dÃ©jÃ  cachetÃ© dans `outputs` avec le mÃªme nom que la source, puis elle convertit cette copie-lÃ  en PDF.
 
 ## Tests
+
+## Flux automatique
+
+Utilisez les scripts sans paramÃ¨tre, dans cet ordre :
+
+```powershell
+.\run_cachet.bat
+.\run_inspecteur.bat
+.\run_pdf.bat
+.\run_recap.bat
+```
+
+Le cachet lit `input` et crÃ©e les DOCX dans `outputs`. Les trois Ã©tapes suivantes utilisent automatiquement la sortie DOCX prÃ©cÃ©dente : la signature Inspecteur ne modifie que les fichiers cachetÃ©s, le PDF convertit les fichiers signÃ©s et le rÃ©capitulatif analyse ces mÃªmes DOCX signÃ©s. Si une Ã©tape prÃ©cÃ©dente n'a pas Ã©tÃ© exÃ©cutÃ©e, le script s'arrÃªte avec un message clair.
 
 ```powershell
 rtk python -m unittest discover -s tests

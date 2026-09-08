@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $false, Position = 0)]
-    [string]$InputPath = ".\input",
+    [string]$InputPath,
 
     [Parameter(Mandatory = $false, Position = 1)]
     [string]$OutputPath
@@ -9,7 +9,6 @@ param(
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$inputFullPath = (Resolve-Path -LiteralPath $InputPath).Path
 $outputDir = Join-Path $projectRoot "outputs"
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
@@ -131,6 +130,10 @@ function Invoke-PdfRoot {
             if ($targetFolder) {
                 New-Item -ItemType Directory -Force -Path $targetFolder | Out-Null
             }
+            if ((Test-Path -LiteralPath $targetFile -PathType Leaf) -and ((Get-Item -LiteralPath $targetFile).LastWriteTime -ge $docx.LastWriteTime)) {
+                Write-Host "PDF deja cree : $targetFile"
+                continue
+            }
             Invoke-ConvertDocx -SourceFile $docx.FullName -TargetFile $targetFile
         }
     }
@@ -142,6 +145,27 @@ function Invoke-PdfRoot {
 }
 
 Set-Location $projectRoot
+
+if (-not $InputPath) {
+    $statePath = Join-Path $outputDir ".last_inspecteur_paths.txt"
+    $sources = @()
+    if (Test-Path -LiteralPath $statePath) {
+        $sources = @(Get-Content -LiteralPath $statePath | Where-Object { Test-Path -LiteralPath $_ -PathType Container })
+    }
+    if (-not $sources) {
+        $sources = @(Get-ChildItem -LiteralPath $outputDir -Directory -Filter "*_inspecteur" | Sort-Object LastWriteTime | Select-Object -ExpandProperty FullName)
+    }
+    if (-not $sources) { throw "Aucun dossier DOCX signe '*_inspecteur' trouve dans outputs." }
+    foreach ($source in $sources) {
+        $leaf = Split-Path -Leaf $source
+        $targetRoot = Join-Path $outputDir ($leaf -replace "_inspecteur$", "_pdf")
+        Invoke-PdfRoot -SourcePath $source -TargetRoot $targetRoot
+        Write-Host "Output root: $targetRoot"
+    }
+    exit 0
+}
+
+$inputFullPath = (Resolve-Path -LiteralPath $InputPath).Path
 
 if (Test-Path -LiteralPath $inputFullPath -PathType Container) {
     $archives = Get-ChildItem -LiteralPath $inputFullPath -File | Where-Object {

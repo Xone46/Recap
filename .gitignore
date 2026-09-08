@@ -8,3 +8,4 @@ input/
 *.xlsx
 !tests/fixtures/**/*.xlsx
 outputs.rar
+signature/
